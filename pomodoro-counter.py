@@ -2,6 +2,7 @@ import time
 import sqlite3
 import os.path
 import subprocess
+import argparse
 
 table = '/Users/nickma/.task/pomodoro/table.db'
 
@@ -73,17 +74,34 @@ def do_task(conn):
     c = conn.cursor()
     c.execute('INSERT INTO pomodoro_work_token VALUES (?,?,?)', t)
 
-def main():
+def break_length(pomodoro_counter):
+    if pomodoro_counter % 4 == 0:
+        take_long_break()
+    else:
+        take_short_break()
+
+def main(args):
     create_or_connect()
-    print("Starting our main task")
-    pomodoro_counter = 0
+    pomodoro_counter = args.pomodoro_counter
+    print("Starting our main task at %d" % pomodoro_counter)
     while True:
         do_task()
         pomodoro_counter += 1
-        if pomodoro_counter % 4 == 0:
-            take_long_break()
-        else:
-            take_short_break()
+        break_length(pomodoro_counter)
+
+def parse_options():
+    parser = argparse.ArgumentParser(description='Add pomodoro support to taskwarrior.')
+    parser.add_argument('--position', dest='pomodoro_counter', 
+                    type=int, default=0,
+                    help='start at pomodoro index, determines length of next break')
+    #parser.add_argument('--work', dest='work',
+    #                const=do_task,
+    #                help='start a work timer in the background')
+    #parser.add_argument('--break', dest='break',
+    #                const=break_length,
+    #                help='start a break timer in the background')
+
+    return parser.parse_args()
 
 if __name__ == "__main__":
-    main()
+    main(parse_options())
