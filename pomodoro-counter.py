@@ -1,14 +1,52 @@
 import time
 import sqlite3
-import os.path
+import os
 import subprocess
 import argparse
+from taskw import TaskWarrior
+import signal
+import sys
 
-table = '/Users/nickma/.task/pomodoro/table.db'
+home = os.environ['HOME']
+table = home + '/.task/pomodoro/table.db'
 
 long_break_time = 1500
 short_break_time = 300
 work_time = 1500
+
+class GracefulInterruptHandler(object):
+
+    def __init__(self, sig=signal.SIGINT):
+        self.sig = sig
+
+    def __enter__(self):
+
+        self.interrupted = False
+        self.released = False
+
+        self.original_handler = signal.getsignal(self.sig)
+
+        def handler(signum, frame):
+            self.release()
+            self.interrupted = True
+
+        signal.signal(self.sig, handler)
+
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.release()
+
+    def release(self):
+
+        if self.released:
+            return False
+
+        signal.signal(self.sig, self.original_handler)
+
+        self.released = True
+
+        return True
 
 def conn_decorator(function):
     def wrap_function(*args, **kwargs):
@@ -22,7 +60,7 @@ def conn_decorator(function):
 def await_user_input(function):
     def wrap_function(*args, **kwargs):
         subprocess.call(["say", "-v", "Cellos", "bom bom boom"])
-        raw_input("Press Enter to continue...")
+        input("Press Enter to continue...")
         return function(*args, **kwargs)
     return wrap_function
 
@@ -32,76 +70,108 @@ def create_or_connect():
     else:
         conn = sqlite3.connect(table)
         c = conn.cursor()
-        c.execute('''CREATE TABLE pomodoro_work_token 
-                (last_modified integer, time_started integer, time_worked integer)''')
-        c.execute('''CREATE TABLE pomodoro_break_token 
-                (last_modified integer, time_started integer, time_breaked integer)''')
+        c.execute('''CREATE TABLE pomodoro_token 
+                (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time_started INTEGER,
+                time_ended INTEGER,
+                type TEXT)''')
+        c.execute('''CREATE TABLE pomodoro_assigned_task
+                (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pomodoro_token_id INTEGER,
+                task_id TEXT, 
+                FOREIGN KEY(pomodoro_token_id) REFERENCES pomodoro_token(id) 
+                )''')
         conn.close()
 
-@conn_decorator
-@await_user_input
-def take_short_break(conn):
+def take_break(conn, break_time):
     print("Take break")
     t_start = time.time()
     time.sleep(short_break_time)
     print("-----")
     t_end = time.time()
-    t = (t_end, t_start, short_break_time)
+    t = (t_start, t_end, 'break')
     c = conn.cursor()
-    c.execute('INSERT INTO pomodoro_break_token VALUES (?,?,?)', t)
+    c.execute('INSERT INTO pomodoro_token VALUES (?,?,?)', t)
+    # return the last row inserted into our data store
+    return c.lastrowid
 
-@conn_decorator
-@await_user_input
-def take_long_break(conn):
-    print("Take break")
-    t_start = time.time()
-    time.sleep(long_break_time)
-    print("-----")
-    t_end = time.time()
-    t = (t_end, t_start, long_break_time)
-    c = conn.cursor()
-    c.execute('INSERT INTO pomodoro_break_token VALUES (?,?,?)', t)
-
-@conn_decorator
-@await_user_input
-def do_task(conn):
+def do_work(conn, work_time):
     print("Do work")
     t_start = time.time()
     time.sleep(work_time)
     print("-----")
     t_end = time.time()
-    t = (t_end, t_start, work_time)
+    t = (t_start, t_end, 'work')
     c = conn.cursor()
-    c.execute('INSERT INTO pomodoro_work_token VALUES (?,?,?)', t)
+    c.execute('INSERT INTO pomodoro_token VALUES (?,?,?)', t)
+    # return the last row inserted into our data store
+    return c.lastrowid
 
-def break_length(pomodoro_counter):
+def assign_token_to_task(conn, task_uuid, token_id):
+    c = conn.cursor()
+    t = (token_id, task_uuid)
+    c.execute('INSERT INTO pomodoro_assigned_task VALUES(?,?)', t)
+
+@conn_decorator
+@await_user_input
+def take_short_break(conn, task_uuid):
+    with GracefulInterruptHandler() as h:
+        token_id = take_break(conn, short_break_time)
+        assign_token_to_task(conn, task_uuid, token_id)
+
+@conn_decorator
+@await_user_input
+def take_long_break(conn, task_uuid):
+    with GracefulInterruptHandler() as h:
+        token_id = take_break(conn, long_break_time)
+        assign_token_to_task(conn, task_uuid, token_id)
+
+@conn_decorator
+@await_user_input
+def do_task(conn, task_uuid):
+    with GracefulInterruptHandler() as h:
+        token_id = do_work(conn, work_time)
+        assign_token_to_task(conn, task_uuid, token_id)
+
+def take_break(task_uuid, pomodoro_counter):
     if pomodoro_counter % 4 == 0:
-        take_long_break()
+        take_long_break(task_uuid)
     else:
-        take_short_break()
+        take_short_break(task_uuid)
 
 def main(args):
     create_or_connect()
     pomodoro_counter = args.pomodoro_counter
-    print("Starting our main task at %d" % pomodoro_counter)
+    print(args.taskw_id)
+    w = TaskWarrior()
+    task_id, task_body = w.get_task(id=args.taskw_id)
+    print("Starting our pomodoro break period: %d on task: %s" % (pomodoro_counter, task_body['description']))
+    task_uuid = task_body['uuid']
     while True:
-        do_task()
+        do_task(task_uuid)
         pomodoro_counter += 1
-        break_length(pomodoro_counter)
+        take_break(pomodoro_counter, task_uuid)
 
 def parse_options():
     parser = argparse.ArgumentParser(description='Add pomodoro support to taskwarrior.')
     parser.add_argument('--position', dest='pomodoro_counter', 
                     type=int, default=0,
-                    help='start at pomodoro index, determines length of next break')
-    #parser.add_argument('--work', dest='work',
-    #                const=do_task,
-    #                help='start a work timer in the background')
-    #parser.add_argument('--break', dest='break',
-    #                const=break_length,
-    #                help='start a break timer in the background')
+                    help='start at pomodoro index, determines length of next break, 3 = long break')
+    parser.add_argument('--workon', dest='taskw_id',
+                    type=int,
+                    help='start target id of task warrior task')
 
     return parser.parse_args()
 
+def exit_gracefully():
+    print("\n...wrapping up jobs and terminating.")
+
 if __name__ == "__main__":
-    main(parse_options())
+    try:
+        main(parse_options())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        exit_gracefully()
