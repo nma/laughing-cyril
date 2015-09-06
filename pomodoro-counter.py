@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import time
 import sqlite3
 import os
@@ -141,18 +143,28 @@ def take_break(task_uuid, pomodoro_counter):
     else:
         take_short_break(task_uuid)
 
+def exit_gracefully():
+    print("\n...wrapping up jobs and terminating.")
+
 def main(args):
-    create_or_connect()
-    pomodoro_counter = args.pomodoro_counter
-    print(args.taskw_id)
     w = TaskWarrior()
-    task_id, task_body = w.get_task(id=args.taskw_id)
-    print("Starting our pomodoro break period: %d on task: %s" % (pomodoro_counter, task_body['description']))
-    task_uuid = task_body['uuid']
-    while True:
-        do_task(task_uuid)
-        pomodoro_counter += 1
-        take_break(pomodoro_counter, task_uuid)
+    try:
+        create_or_connect()
+        pomodoro_counter = args.pomodoro_counter
+        task_id, task_body = w.get_task(id=args.taskw_id)
+        print("Starting our pomodoro break period: %d on task: %s" % (pomodoro_counter, task_body['description']))
+        task_uuid = task_body['uuid']
+        subprocess.call(["task", task_id, "start"])
+        while True:
+            do_task(task_uuid)
+            pomodoro_counter += 1
+            take_break(pomodoro_counter, task_uuid)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        exit_gracefully()
+        subprocess.call(["task", task_id, "stop"])
+
 
 def parse_options():
     parser = argparse.ArgumentParser(description='Add pomodoro support to taskwarrior.')
@@ -160,18 +172,10 @@ def parse_options():
                     type=int, default=0,
                     help='start at pomodoro index, determines length of next break, 3 = long break')
     parser.add_argument('--workon', dest='taskw_id',
-                    type=int,
+                    type=int, required=True,
                     help='start target id of task warrior task')
 
     return parser.parse_args()
 
-def exit_gracefully():
-    print("\n...wrapping up jobs and terminating.")
-
 if __name__ == "__main__":
-    try:
-        main(parse_options())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        exit_gracefully()
+    main(parse_options())
