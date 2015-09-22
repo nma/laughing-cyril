@@ -88,7 +88,7 @@ def create_or_connect():
         conn.close()
 
 def take_break(conn, break_time):
-    print("Take break")
+    print("Take break for %d minutes..." % (break_time / 60))
     t_start = time.time()
     time.sleep(short_break_time)
     print("-----")
@@ -100,7 +100,7 @@ def take_break(conn, break_time):
     return c.lastrowid
 
 def do_work(conn, work_time):
-    print("Do work")
+    print("Do work for %d minutes..." % (work_time / 60))
     t_start = time.time()
     time.sleep(work_time)
     print("-----")
@@ -163,6 +163,7 @@ def exit_gracefully():
 
 def main(args):
     w = TaskWarrior()
+    task_id = 0
     try:
         create_or_connect()
         pomodoro_counter = args.pomodoro_counter
@@ -185,8 +186,7 @@ def parse_options():
     parser.add_argument('--position', dest='pomodoro_counter', 
                     type=int, default=0,
                     help='start at pomodoro index, determines length of next break, 3 = long break')
-    parser.add_argument('--workon', dest='taskw_id',
-                    type=int, required=True,
+    parser.add_argument('taskw_id', type=int,
                     help='start target id of task warrior task')
 
     return parser.parse_args()
