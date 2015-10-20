@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import time
 import sqlite3
@@ -61,7 +61,13 @@ def conn_decorator(function):
 
 def await_user_input(function):
     def wrap_function(*args, **kwargs):
-        subprocess.call(["say", "-v", "Cellos", "bom bom boom"])
+        try:
+            # osx
+            subprocess.call(["say", "-v", "Cellos", "bom bom boom"])
+        except:
+            # other
+            subprocess.call(["espeak", "-v", "en", "YO! check the terminal"])
+
         input("Press Enter to continue...")
         return function(*args, **kwargs)
     return wrap_function
