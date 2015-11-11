@@ -96,7 +96,7 @@ def create_or_connect():
 def take_break(conn, break_time):
     print("Take break for %d minutes..." % (break_time / 60))
     t_start = time.time()
-    time.sleep(short_break_time)
+    time.sleep(break_time)
     print("-----")
     t_end = time.time()
     t = (t_start, t_end, 'break')
