@@ -16,6 +16,7 @@ long_break_time = 1500
 short_break_time = 300
 work_time = 1500
 
+
 class GracefulInterruptHandler(object):
 
     def __init__(self, sig=signal.SIGINT):
@@ -50,6 +51,7 @@ class GracefulInterruptHandler(object):
 
         return True
 
+
 def conn_decorator(function):
     def wrap_function(*args, **kwargs):
         try:
@@ -58,6 +60,7 @@ def conn_decorator(function):
         finally:
             conn.close()
     return wrap_function
+
 
 def await_user_input(function):
     def wrap_function(*args, **kwargs):
@@ -71,6 +74,21 @@ def await_user_input(function):
         input("Press Enter to continue...")
         return function(*args, **kwargs)
     return wrap_function
+
+
+def start_task_decorator(function):
+    def wrap_function(*args, **kwargs):
+        subprocess.call(["task", str(kwargs['task_id']), "start"])
+        return function(*args, **kwargs)
+    return wrap_function
+
+
+def stop_task_decorator(function):
+    def wrap_function(*args, **kwargs):
+        subprocess.call(["task", str(kwargs['task_id']), "stop"])
+        return function(*args, **kwargs)
+    return wrap_function
+
 
 def create_or_connect():
     if os.path.exists(table):
@@ -93,6 +111,7 @@ def create_or_connect():
                 )''')
         conn.close()
 
+
 def take_break(conn, break_time):
     print("Take break for %d minutes..." % (break_time / 60))
     t_start = time.time()
@@ -104,6 +123,7 @@ def take_break(conn, break_time):
     c.execute('INSERT INTO pomodoro_token (time_started, time_ended, type) VALUES (?,?,?)', t)
     # return the last row inserted into our data store
     return c.lastrowid
+
 
 def do_work(conn, work_time):
     print("Do work for %d minutes..." % (work_time / 60))
@@ -117,14 +137,17 @@ def do_work(conn, work_time):
     # return the last row inserted into our data store
     return c.lastrowid
 
+
 def assign_token_to_task(conn, task_uuid, token_id):
     c = conn.cursor()
     t = (token_id, task_uuid)
     c.execute('INSERT INTO pomodoro_assigned_task (pomodoro_token_id, task_id) VALUES (?,?)', t)
 
+
 @conn_decorator
 @await_user_input
-def take_short_break(conn, task_uuid=None):
+@stop_task_decorator
+def take_short_break(conn, task_uuid=None, task_id=None):
     with GracefulInterruptHandler() as h:
         token_id = take_break(conn, short_break_time)
         assign_token_to_task(conn, task_uuid, token_id)
@@ -134,9 +157,11 @@ def take_short_break(conn, task_uuid=None):
         else:
             conn.commit()
 
+
 @conn_decorator
 @await_user_input
-def take_long_break(conn, task_uuid=None):
+@stop_task_decorator
+def take_long_break(conn, task_uuid=None, task_id=None):
     with GracefulInterruptHandler() as h:
         token_id = take_break(conn, long_break_time)
         assign_token_to_task(conn, task_uuid, token_id)
@@ -146,9 +171,11 @@ def take_long_break(conn, task_uuid=None):
         else:
             conn.commit()
 
+
 @conn_decorator
 @await_user_input
-def do_task_work(conn, task_uuid):
+@start_task_decorator
+def do_task_work(conn, task_uuid, task_id=None):
     with GracefulInterruptHandler() as h:
         token_id = do_work(conn, work_time)
         assign_token_to_task(conn, task_uuid, token_id)
@@ -158,14 +185,17 @@ def do_task_work(conn, task_uuid):
         else:
             conn.commit()
 
-def do_task_break(pomodoro_counter, task_uuid):
+
+def do_task_break(pomodoro_counter, task_uuid, task_id):
     if pomodoro_counter % 4 == 0:
-        take_long_break(task_uuid=task_uuid)
+        take_long_break(task_uuid=task_uuid, task_id=task_id)
     else:
-        take_short_break(task_uuid=task_uuid)
+        take_short_break(task_uuid=task_uuid, task_id=task_id)
+
 
 def exit_gracefully():
     print("\n...wrapping up jobs and terminating.")
+
 
 def main(args):
     w = TaskWarrior()
@@ -176,16 +206,16 @@ def main(args):
         task_id, task_body = w.get_task(id=args.taskw_id)
         print("Starting our pomodoro break period: %d on task: %s" % (pomodoro_counter, task_body['description']))
         task_uuid = task_body['uuid']
-        subprocess.call(["task", str(task_id), "start"])
         while True:
-            do_task_work(task_uuid)
+            do_task_work(task_uuid, task_id=task_id)
             pomodoro_counter += 1
-            do_task_break(pomodoro_counter, task_uuid)
+            do_task_break(pomodoro_counter, task_uuid, task_id=task_id)
     except KeyboardInterrupt:
         pass
     finally:
         exit_gracefully()
         subprocess.call(["task", str(task_id), "stop"])
+
 
 def parse_options():
     parser = argparse.ArgumentParser(description='Add pomodoro support to taskwarrior.')
